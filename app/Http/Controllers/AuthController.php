@@ -3,89 +3,84 @@
 namespace App\Http\Controllers;
 
 use App\Models\Usuario;
-use App\Models\Administrativo;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
+    // POST /api/registro
     public function register(Request $r)
     {
         $data = $r->validate([
-            'ci_usuario'      => 'required|string|max:20|unique:usuarios,ci_usuario',
-            'primer_nombre'   => 'required|string|max:60',
-            'primer_apellido' => 'required|string|max:60',
-            'segundo_nombre'  => 'nullable|string|max:60',
-            'segundo_apellido'=> 'nullable|string|max:60',
-            'email'           => 'nullable|email',
-            'telefono'        => 'nullable|string|max:30',
-            'password'        => 'required|string|min:6|max:100',
-            'rol'             => 'nullable|in:socio,admin',
+            'ci_usuario'       => 'required|string|max:20|unique:usuarios,ci_usuario',
+            'primer_nombre'    => 'required|string|max:60',
+            'segundo_nombre'   => 'nullable|string|max:60',
+            'primer_apellido'  => 'required|string|max:60',
+            'segundo_apellido' => 'nullable|string|max:60',
+            'email'            => 'required|email|max:120|unique:usuarios,email',
+            'telefono'         => 'nullable|string|max:30',
+            'password'         => 'required|string|min:6',
         ]);
 
         $u = Usuario::create([
-            ...$data,
-            'password'        => Hash::make($data['password']),
-            'estado_registro' => 'Aprobado',
-            'rol'             => $data['rol'] ?? 'socio',
+            'ci_usuario'       => $data['ci_usuario'],
+            'primer_nombre'    => $data['primer_nombre'],
+            'segundo_nombre'   => $data['segundo_nombre'] ?? null,
+            'primer_apellido'  => $data['primer_apellido'],
+            'segundo_apellido' => $data['segundo_apellido'] ?? null,
+            'email'            => $data['email'],
+            'telefono'         => $data['telefono'] ?? null,
+            'password'         => Hash::make($data['password']),
+            'estado_registro'  => 'Pendiente',
+            'rol'              => 'socio',
         ]);
 
-        if (($data['rol'] ?? 'socio') === 'admin') {
-            Administrativo::firstOrCreate(['ci_usuario' => $data['ci_usuario']]);
-        }
-
-        return response()->json($u, 201);
+        return response()->json([
+            'ok'   => true,
+            'user' => $u->only(['ci_usuario','primer_nombre','primer_apellido','email','estado_registro','rol']),
+        ], 201);
     }
 
+    // POST /api/login  (acepta CI o email en "login")
     public function login(Request $r)
     {
-        $r->validate([
-            'ci_usuario' => 'required|string|max:20',
-            'password'   => 'required|string',
+        $data = $r->validate([
+            'login'    => 'required|string',
+            'password' => 'required|string',
         ]);
 
-        $u = Usuario::find($r->ci_usuario);
-        if (!$u || !Hash::check($r->password, $u->password)) {
-            throw ValidationException::withMessages(['ci_usuario' => ['Credenciales inválidas.']]);
-        }
-        if ($u->estado_registro !== 'Aprobado') {
-            return response()->json(['message' => 'Usuario no aprobado'], 403);
+        $u = filter_var($data['login'], FILTER_VALIDATE_EMAIL)
+            ? Usuario::where('email', $data['login'])->first()
+            : Usuario::where('ci_usuario', $data['login'])->first();
+
+        if (!$u || !Hash::check($data['password'], $u->password)) {
+            throw ValidationException::withMessages([
+                'login' => ['Credenciales inválidas.'],
+            ]);
         }
 
-        $rol = Administrativo::where('ci_usuario', $u->ci_usuario)->exists() ? 'admin' : $u->rol;
         $token = $u->createToken('token')->plainTextToken;
 
         return response()->json([
+            'ok'    => true,
             'token' => $token,
-            'rol'   => $rol,
-            'user'  => [
-                'ci_usuario' => $u->ci_usuario,
-                'nombre'     => trim($u->primer_nombre.' '.$u->primer_apellido),
-            ],
+            'user'  => $u->only(['ci_usuario','primer_nombre','primer_apellido','email','estado_registro','rol']),
         ]);
     }
 
+    // GET /api/me  (protegido)
     public function me(Request $r)
     {
-        $u = $r->user();
-        if (!$u) return response()->json(['message' => 'No autenticado'], 401);
-
-        $rol = Administrativo::where('ci_usuario', $u->ci_usuario)->exists() ? 'admin' : $u->rol;
-
-        return response()->json([
-            'user' => [
-                'ci_usuario' => $u->ci_usuario,
-                'nombre'     => trim($u->primer_nombre.' '.$u->primer_apellido),
-                'estado'     => $u->estado_registro,
-            ],
-            'rol' => $rol,
-        ]);
+        return response()->json($r->user()->only([
+            'ci_usuario','primer_nombre','primer_apellido','email','estado_registro','rol'
+        ]));
     }
 
+    // POST /api/logout  (protegido)
     public function logout(Request $r)
     {
-        if ($r->user()) $r->user()->currentAccessToken()->delete();
-        return response()->json(['message' => 'ok']);
+        $r->user()->currentAccessToken()->delete();
+        return response()->json(['ok' => true]);
     }
 }
