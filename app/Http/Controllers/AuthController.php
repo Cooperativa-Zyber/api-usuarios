@@ -38,7 +38,9 @@ class AuthController extends Controller
 
         return response()->json([
             'ok'   => true,
-            'user' => $u->only(['ci_usuario','primer_nombre','primer_apellido','email','estado_registro','rol']),
+            'user' => $u->only([
+                'ci_usuario','primer_nombre','primer_apellido','email','estado_registro','rol'
+            ]),
         ], 201);
     }
 
@@ -54,10 +56,20 @@ class AuthController extends Controller
             ? Usuario::where('email', $data['login'])->first()
             : Usuario::where('ci_usuario', $data['login'])->first();
 
+        // Credenciales inválidas
         if (!$u || !Hash::check($data['password'], $u->password)) {
             throw ValidationException::withMessages([
                 'login' => ['Credenciales inválidas.'],
             ]);
+        }
+
+        // Bloquea acceso si no está aprobado
+        if ($u->estado_registro !== 'Aprobado') {
+            return response()->json([
+                'ok'              => false,
+                'message'         => 'Tu registro aún no fue aprobado.',
+                'estado_registro' => $u->estado_registro,
+            ], 403);
         }
 
         $token = $u->createToken('token')->plainTextToken;
@@ -65,7 +77,9 @@ class AuthController extends Controller
         return response()->json([
             'ok'    => true,
             'token' => $token,
-            'user'  => $u->only(['ci_usuario','primer_nombre','primer_apellido','email','estado_registro','rol']),
+            'user'  => $u->only([
+                'ci_usuario','primer_nombre','primer_apellido','email','estado_registro','rol'
+            ]),
         ]);
     }
 
