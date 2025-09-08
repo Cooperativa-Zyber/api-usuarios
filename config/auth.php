@@ -12,23 +12,14 @@ return [
             'driver' => 'session',
             'provider' => 'users',
         ],
-
-        'api' => [
-            'driver' => 'sanctum',     // ← usa Sanctum
-            'provider' => 'users',
-        ],
+        // Con Sanctum no hace falta definir un guard "api" aquí.
     ],
 
     'providers' => [
         'users' => [
             'driver' => 'eloquent',
-            'model' => App\Models\Usuario::class,  // ← tu modelo
+            'model' => App\Models\Usuario::class, // Asegurate de que exista este modelo
         ],
-
-        // 'users' => [
-        //     'driver' => 'database',
-        //     'table' => 'users',
-        // ],
     ],
 
     'passwords' => [
