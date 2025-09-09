@@ -1,24 +1,32 @@
 <?php
 
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\PerfilController;
-use App\Http\Controllers\AdminUsuariosController;
 
-Route::prefix('v1')->group(function () {
-    Route::post('/registro', [AuthController::class, 'register']);
-    Route::post('/login',    [AuthController::class, 'login']);
+/*
+|--------------------------------------------------------------------------
+| Preflight (CORS) — responde 204 a cualquier OPTIONS /api/*
+|--------------------------------------------------------------------------
+*/
+Route::options('{any}', function () {
+    return response()->noContent(); // 204
+})->where('any', '.*');
 
-    Route::middleware('auth:sanctum')->group(function () {
-        Route::get('/me',      [AuthController::class, 'me']);
-        Route::post('/logout', [AuthController::class, 'logout']);
+/*
+|--------------------------------------------------------------------------
+| Endpoints públicos
+|--------------------------------------------------------------------------
+*/
+Route::post('/login', [AuthController::class, 'login']);
+Route::post('/logout', [AuthController::class, 'logout'])->middleware('auth:sanctum');
 
-        Route::get('/perfil',  [PerfilController::class, 'show']);
-        Route::put('/perfil',  [PerfilController::class, 'update']);
-
-        Route::middleware('is_admin')->group(function () {
-            Route::get('/admin/usuarios/pendientes',  [AdminUsuariosController::class, 'pendientes']);
-            Route::put('/admin/usuarios/{ci}/estado', [AdminUsuariosController::class, 'setEstado']);
-        });
-    });
+/*
+|--------------------------------------------------------------------------
+| Endpoints protegidos
+|--------------------------------------------------------------------------
+*/
+Route::middleware('auth:sanctum')->group(function () {
+    Route::get('/me', [PerfilController::class, 'me']);
 });

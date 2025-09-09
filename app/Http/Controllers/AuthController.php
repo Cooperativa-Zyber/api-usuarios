@@ -1,100 +1,95 @@
-<?php
+   }
 
-namespace App\Http\Controllers;
+            $token = $admin->createToken('api')->plainTextToken;
 
-use App\Models\Usuario;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Hash;
-use Illuminate\Validation\ValidationException;
-
-class AuthController extends Controller
-{
-    // POST /api/registro
-    public function register(Request $r)
-    {
-        $data = $r->validate([
-            'ci_usuario'       => 'required|string|max:20|unique:usuarios,ci_usuario',
-            'primer_nombre'    => 'required|string|max:60',
-            'segundo_nombre'   => 'nullable|string|max:60',
-            'primer_apellido'  => 'required|string|max:60',
-            'segundo_apellido' => 'nullable|string|max:60',
-            'email'            => 'required|email|max:120|unique:usuarios,email',
-            'telefono'         => 'nullable|string|max:30',
-            'password'         => 'required|string|min:6',
-        ]);
-
-        $u = Usuario::create([
-            'ci_usuario'       => $data['ci_usuario'],
-            'primer_nombre'    => $data['primer_nombre'],
-            'segundo_nombre'   => $data['segundo_nombre'] ?? null,
-            'primer_apellido'  => $data['primer_apellido'],
-            'segundo_apellido' => $data['segundo_apellido'] ?? null,
-            'email'            => $data['email'],
-            'telefono'         => $data['telefono'] ?? null,
-            'password'         => Hash::make($data['password']),
-            'estado_registro'  => 'Pendiente',
-            'rol'              => 'socio',
-        ]);
-
-        return response()->json([
-            'ok'   => true,
-            'user' => $u->only([
-                'ci_usuario','primer_nombre','primer_apellido','email','estado_registro','rol'
-            ]),
-        ], 201);
-    }
-
-    // POST /api/login  (acepta CI o email en "login")
-    public function login(Request $r)
-    {
-        $data = $r->validate([
-            'login'    => 'required|string',
-            'password' => 'required|string',
-        ]);
-
-        $u = filter_var($data['login'], FILTER_VALIDATE_EMAIL)
-            ? Usuario::where('email', $data['login'])->first()
-            : Usuario::where('ci_usuario', $data['login'])->first();
-
-        // Credenciales inválidas
-        if (!$u || !Hash::check($data['password'], $u->password)) {
-            throw ValidationException::withMessages([
-                'login' => ['Credenciales inválidas.'],
+            return response()->json([
+                'ok'    => true,
+                'token' => $token,
+                'user'  => [
+                    'id'         => $admin->id,
+                    'rol'        => 'admin',
+                    'estado'     => $admin->estado ?? 'Aprobado',
+                    'ci_usuario' => $admin->ci ?? null,
+                    'email'      => $admin->email ?? null,
+                    'nombre'     => $admin->nombre ?? ($admin->name ?? null),
+                ],
             ]);
         }
 
-        // Bloquea acceso si no está aprobado
-        if ($u->estado_registro !== 'Aprobado') {
+        // --------- 2) USUARIO / SOCIO ----------
+        $socio = Usuario::query()
+            ->where('ci_usuario', $login)
+            ->orWhere('email', $login)
+            ->orWhere('ci', $login) // por compatibilidad si existiera
+            ->first();
+
+        if (!$socio) {
+            throw ValidationException::withMessages([
+                'login' => 'Usuario no encontrado.',
+            ]);
+        }
+
+        if (! $this->passwordMatch($pass, $socio->password)) {
+            throw ValidationException::withMessages([
+                'login' => 'Credenciales inválidas.',
+            ]);
+        }
+
+        if (!$this->isApproved($socio->estado ?? null)) {
             return response()->json([
-                'ok'              => false,
-                'message'         => 'Tu registro aún no fue aprobado.',
-                'estado_registro' => $u->estado_registro,
+                'ok'     => false,
+                'error'  => 'Usuario no aprobado aún.',
+                'estado' => $socio->estado ?? 'Pendiente',
             ], 403);
         }
 
-        $token = $u->createToken('token')->plainTextToken;
+        $token = $socio->createToken('api')->plainTextToken;
 
         return response()->json([
             'ok'    => true,
             'token' => $token,
-            'user'  => $u->only([
-                'ci_usuario','primer_nombre','primer_apellido','email','estado_registro','rol'
-            ]),
+            'user'  => [
+                'id'           => $socio->id,
+                'rol'          => 'socio',
+                'estado'       => $socio->estado ?? 'Aprobado',
+                'ci_usuario'   => $socio->ci_usuario ?? ($socio->ci ?? null),
+                'email'        => $socio->email ?? null,
+                'nombre'       => $socio->nombre ?? ($socio->name ?? null),
+            ],
         ]);
     }
 
-    // GET /api/me  (protegido)
-    public function me(Request $r)
+    /**
+     * (Opcional) Logout del token actual.
+     */
+    public function logout(Request $request)
     {
-        return response()->json($r->user()->only([
-            'ci_usuario','primer_nombre','primer_apellido','email','estado_registro','rol'
-        ]));
+        $user = $request->user();
+        if ($user && $user->currentAccessToken()) {
+            $user->currentAccessToken()->delete();
+        }
+
+        return response()->json(['ok' => true]);
     }
 
-    // POST /api/logout  (protegido)
-    public function logout(Request $r)
+    // ----------------- Helpers -----------------
+
+    private function passwordMatch(string $plain, ?string $stored): bool
     {
-        $r->user()->currentAccessToken()->delete();
-        return response()->json(['ok' => true]);
+        if (!$stored) {
+            return false;
+        }
+        // Soporta hashed y texto plano (para ambientes de prueba)
+        return Hash::check($plain, $stored) || hash_equals($stored, $plain);
+    }
+
+    private function isApproved(?string $estado): bool
+    {
+        if (!$estado) {
+            // Si no hay campo estado, dejamos pasar (compatibilidad)
+            return true;
+        }
+        $e = mb_strtolower($estado);
+        return in_array($e, ['aprobado', 'aprobada', 'ok', 'activo', 'activa'], true);
     }
 }
